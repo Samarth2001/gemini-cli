@@ -15,13 +15,15 @@ import type {
   RootContent,
 } from 'hast';
 import { themeManager } from '../themes/theme-manager.js';
-import { Theme } from '../themes/theme.js';
+import type { Theme } from '../themes/theme.js';
 import {
   MaxSizedBox,
   MINIMUM_MAX_HEIGHT,
 } from '../components/shared/MaxSizedBox.js';
+import type { LoadedSettings } from '../../config/settings.js';
+import { debugLogger } from '@google/gemini-cli-core';
 
-// Configure themeing and parsing utilities.
+// Configure theming and parsing utilities.
 const lowlight = createLowlight(common);
 
 function renderHastNode(
@@ -30,14 +32,15 @@ function renderHastNode(
   inheritedColor: string | undefined,
 ): React.ReactNode {
   if (node.type === 'text') {
-    // Use the color passed down from parent element, if any
-    return <Text color={inheritedColor}>{node.value}</Text>;
+    // Use the color passed down from parent element, or the theme's default.
+    const color = inheritedColor || theme.defaultColor;
+    return <Text color={color}>{node.value}</Text>;
   }
 
   // Handle Element Nodes: Determine color and pass it down, don't wrap
   if (node.type === 'element') {
     const nodeClasses: string[] =
-      (node.properties?.className as string[]) || [];
+      (node.properties?.['className'] as string[]) || [];
     let elementColor: string | undefined = undefined;
 
     // Find color defined specifically for this element's class
@@ -50,7 +53,7 @@ function renderHastNode(
     }
 
     // Determine the color to pass down: Use this element's specific color
-    // if found, otherwise, continue passing down the already inherited color.
+    // if found; otherwise, continue passing down the already inherited color.
     const colorToPassDown = elementColor || inheritedColor;
 
     // Recursively render children, passing the determined color down
@@ -68,9 +71,9 @@ function renderHastNode(
     return <React.Fragment>{children}</React.Fragment>;
   }
 
-  // Handle Root Node: Start recursion with initial inherited color
+  // Handle Root Node: Start recursion with initially inherited color
   if (node.type === 'root') {
-    // Check if children array is empty - this happens when lowlight can't detect language – fallback to plain text
+    // Check if children array is empty - this happens when lowlight can't detect language – fall back to plain text
     if (!node.children || node.children.length === 0) {
       return null;
     }
@@ -88,6 +91,34 @@ function renderHastNode(
   return null;
 }
 
+function highlightAndRenderLine(
+  line: string,
+  language: string | null,
+  theme: Theme,
+): React.ReactNode {
+  try {
+    const getHighlightedLine = () =>
+      !language || !lowlight.registered(language)
+        ? lowlight.highlightAuto(line)
+        : lowlight.highlight(language, line);
+
+    const renderedNode = renderHastNode(getHighlightedLine(), theme, undefined);
+
+    return renderedNode !== null ? renderedNode : line;
+  } catch (_error) {
+    return line;
+  }
+}
+
+export function colorizeLine(
+  line: string,
+  language: string | null,
+  theme?: Theme,
+): React.ReactNode {
+  const activeTheme = theme || themeManager.getActiveTheme();
+  return highlightAndRenderLine(line, language, activeTheme);
+}
+
 /**
  * Renders syntax-highlighted code for Ink applications using a selected theme.
  *
@@ -100,9 +131,15 @@ export function colorizeCode(
   language: string | null,
   availableHeight?: number,
   maxWidth?: number,
+  theme?: Theme,
+  settings?: LoadedSettings,
+  hideLineNumbers?: boolean,
 ): React.ReactNode {
   const codeToHighlight = code.replace(/\n$/, '');
-  const activeTheme = themeManager.getActiveTheme();
+  const activeTheme = theme || themeManager.getActiveTheme();
+  const showLineNumbers = hideLineNumbers
+    ? false
+    : (settings?.merged.ui?.showLineNumbers ?? true);
 
   try {
     // Render the HAST tree using the adapted theme
@@ -122,11 +159,6 @@ export function colorizeCode(
       }
     }
 
-    const getHighlightedLines = (line: string) =>
-      !language || !lowlight.registered(language)
-        ? lowlight.highlightAuto(line)
-        : lowlight.highlight(language, line);
-
     return (
       <MaxSizedBox
         maxHeight={availableHeight}
@@ -135,18 +167,22 @@ export function colorizeCode(
         overflowDirection="top"
       >
         {lines.map((line, index) => {
-          const renderedNode = renderHastNode(
-            getHighlightedLines(line),
+          const contentToRender = highlightAndRenderLine(
+            line,
+            language,
             activeTheme,
-            undefined,
           );
 
-          const contentToRender = renderedNode !== null ? renderedNode : line;
           return (
             <Box key={index}>
-              <Text color={activeTheme.colors.Gray}>
-                {`${String(index + 1 + hiddenLinesCount).padStart(padWidth, ' ')} `}
-              </Text>
+              {showLineNumbers && (
+                <Text color={activeTheme.colors.Gray}>
+                  {`${String(index + 1 + hiddenLinesCount).padStart(
+                    padWidth,
+                    ' ',
+                  )} `}
+                </Text>
+              )}
               <Text color={activeTheme.defaultColor} wrap="wrap">
                 {contentToRender}
               </Text>
@@ -156,11 +192,11 @@ export function colorizeCode(
       </MaxSizedBox>
     );
   } catch (error) {
-    console.error(
+    debugLogger.warn(
       `[colorizeCode] Error highlighting code for language "${language}":`,
       error,
     );
-    // Fallback to plain text with default color on error
+    // Fall back to plain text with default color on error
     // Also display line numbers in fallback
     const lines = codeToHighlight.split('\n');
     const padWidth = String(lines.length).length; // Calculate padding width based on number of lines
@@ -172,9 +208,11 @@ export function colorizeCode(
       >
         {lines.map((line, index) => (
           <Box key={index}>
-            <Text color={activeTheme.defaultColor}>
-              {`${String(index + 1).padStart(padWidth, ' ')} `}
-            </Text>
+            {showLineNumbers && (
+              <Text color={activeTheme.defaultColor}>
+                {`${String(index + 1).padStart(padWidth, ' ')} `}
+              </Text>
+            )}
             <Text color={activeTheme.colors.Gray}>{line}</Text>
           </Box>
         ))}

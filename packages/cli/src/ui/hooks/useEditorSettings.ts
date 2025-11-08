@@ -5,12 +5,15 @@
  */
 
 import { useState, useCallback } from 'react';
-import { LoadedSettings, SettingScope } from '../../config/settings.js';
+import type {
+  LoadableSettingScope,
+  LoadedSettings,
+} from '../../config/settings.js';
 import { type HistoryItem, MessageType } from '../types.js';
+import type { EditorType } from '@google/gemini-cli-core';
 import {
   allowEditorTypeInSandbox,
   checkHasEditorType,
-  EditorType,
 } from '@google/gemini-cli-core';
 
 interface UseEditorSettingsReturn {
@@ -18,7 +21,7 @@ interface UseEditorSettingsReturn {
   openEditorDialog: () => void;
   handleEditorSelect: (
     editorType: EditorType | undefined,
-    scope: SettingScope,
+    scope: LoadableSettingScope,
   ) => void;
   exitEditorDialog: () => void;
 }
@@ -35,7 +38,7 @@ export const useEditorSettings = (
   }, []);
 
   const handleEditorSelect = useCallback(
-    (editorType: EditorType | undefined, scope: SettingScope) => {
+    (editorType: EditorType | undefined, scope: LoadableSettingScope) => {
       if (
         editorType &&
         (!checkHasEditorType(editorType) ||
